@@ -1,0 +1,122 @@
+
+<div id="app"></div>
+<script>
+
+(function(){
+
+var state, thread, Orb, Layers, 
+
+currentState='start', lt = new Date(), frameRate=1000/30,
+
+sheets;
+
+/*
+Using the requesrAnimationFrame shim found at: https://gist.github.com/mrdoob/838785 
+
+ * Provides requestAnimationFrame in a cross browser way.
+ * @author paulirish / http://paulirish.com/
+
+*/
+if (!window.requestAnimationFrame) { 
+	window.requestAnimationFrame = ( function() { 
+		return window.webkitRequestAnimationFrame ||
+		window.mozRequestAnimationFrame ||
+		window.oRequestAnimationFrame ||
+		window.msRequestAnimationFrame ||
+		function(callback, element ) { 
+			window.setTimeout( callback, 1000 / 60 );
+ 
+		};
+ 
+	} )(); 
+}
+
+Layers = function(container, names,w,h){
+    var i=0, len = names.length,can,con;
+	
+    this.canvas=[];
+	this.context=[];
+	
+	while(i < len){
+	    can = document.createElement('canvas');
+		con = can.getContext('2d');
+		can.width=w;
+		can.height=h;
+		document.getElementById(container).appendChild(can);		
+		this.canvas.push(can);
+		this.context.push(con);		
+	    i++;
+	}
+};
+
+Layers.prototype={
+    clear:function(index){
+	    this.context[index].clearRect(0,0,this.canvas[index].width,this.canvas[index].height);
+	},
+	fillTo:function(index,color){
+	    this.context[index].fillStyle=color;
+	    this.context[index].fillRect(0,0,this.canvas[index].width,this.canvas[index].height);
+	
+	}
+};
+
+Orb = function(x,y){
+    this.x=x;
+	this.y=y;
+	this.w=32;
+	this.h=32;
+	
+	this.level=1;
+	this.xp=0;
+	
+	this.base = {
+	    maxHp:100,
+	    range:3,
+		attack:7
+	};
+	
+	this.skillPoints=10;
+	this.elements={
+	    earth:1,
+		wind:1,
+		water:1,
+		fire:1	
+	}
+	
+	this.hp=this.base.maxHp;
+	
+};
+
+state = {
+    start:{
+	    update:function(){
+		    sheets = new Layers('app',['background','player'], 640,480);
+			
+			console.log(sheets);
+			sheets.fillTo(0, '#000000')
+		    currentState='game';
+			console.log(currentState);
+		},
+		render:function(){}
+	},
+	game:{
+	    update:function(){},
+		render:function(){}
+	}
+	
+};
+
+thread = function(){
+    requestAnimationFrame(thread);
+	
+	if(new Date() - lt >= frameRate){
+	    state[currentState].update();
+	    state[currentState].render();
+		lt = new Date();
+	}
+};
+thread();
+
+})();
+
+</script>

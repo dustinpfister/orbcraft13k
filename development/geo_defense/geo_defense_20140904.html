@@ -1,0 +1,996 @@
+
+<div id="app"></div>
+<script>
+
+(function(){
+
+var Shell, // a custom framework for this game
+        
+	Game, // the Main game class will be used to do most of the work with the game
+	currentGame, // will hold the current instance of Game class
+	Orb, // the orb class reltes to the games "Orbs" which can be "socketed" to a building type of "Orb Socket"
+	Building, // players Building class	
+	Enemy, // the Enemy Class
+	
+	
+	Layers, // a class used for canvas layering
+	sheets, // will hold an instance of Layers
+	state, // the state machine
+    currentState='start', // the state machines current state
+	lt = new Date(), // "last time" used to cap frame rate
+	frameRate=1, // the frame rate of the game
+	thread, // the main game loop
+    
+	mx=0,my=0,
+	
+	win=0,
+	lost=0; // mouse x and y position
+	
+	
+	
+	//Player,
+	//player;
+
+/*
+    Using the requesrAnimationFrame shim found at: https://gist.github.com/mrdoob/838785 
+
+    * Provides requestAnimationFrame in a cross browser way.
+    * @author paulirish / http://paulirish.com/
+
+*/
+if (!window.requestAnimationFrame) { 
+	window.requestAnimationFrame = ( function() { 
+		return window.webkitRequestAnimationFrame ||
+		window.mozRequestAnimationFrame ||
+		window.oRequestAnimationFrame ||
+		window.msRequestAnimationFrame ||
+		function(callback, element ) { 
+			window.setTimeout( callback, 1000 / 60 );
+ 
+		};
+ 
+	} )(); 
+}
+
+
+
+
+/*
+   Shell is a custom framework that contains a few functions used throughout this game
+*/
+Shell = {
+    /*
+	    Shell.distance
+		-- the distance formula
+	
+	*/
+    distance : function(x1,y1,x2,y2){
+        return Math.sqrt(  Math.pow(x1-x2,2)+Math.pow(y1-y2,2)  );    
+	},
+	/*
+	    Shell.boundingBox
+		-- bounding box collision detection
+	
+	*/
+	boundingBox: function (x1, y1, w1, h1, x2, y2, w2, h2) {
+        var o = !1;  // default to false
+        if ((x1 > x2 + w2) || (x1 + w1 < x2) || (y1 + h1 < y2) || (y1 > y2 + h2)) { // if the two objects do not overlap
+            o = !1;  //then they do not overlap
+        } else {
+            o = !0;  // else they do
+        };
+        return o; // return the boolean answer
+    },
+	/*
+	    Shell.percent
+		-- simple percent function
+	*/
+	percent : function(low,high){
+	    return low * 100 / high;
+	},
+	/*
+	    Shell.findAngles
+		-- find the angles that are between a currentHeading and a targetHeading to know which
+		is the shorter distance to move when changing a heading.
+	*/
+	findAngles:function(currentHeading,targetHeading){
+	    var angles={};
+	    angles.clock=currentHeading-targetHeading,angles.counter=targetHeading-currentHeading;
+		if(angles.clock < 0) angles.clock+=Math.PI*2;
+		if(angles.counter <0) angles.counter+=Math.PI*2;
+		//if(angle1 < angle2){ return true}else{return false};
+	    return angles;
+	},
+	/*
+	    Shell.bind
+		-- use to bind event handlers to an Element
+	
+	*/
+	bind:function(el, eventName, eventHandler) {
+	    if (el.addEventListener) {
+	        el.addEventListener(eventName, eventHandler, false); 
+	    }else{
+ 	        if (el.attachEvent) {
+	            el.attachEvent('on' + eventName, eventHandler);
+	        }
+	    }
+    },
+};
+
+
+/*
+    The Layers Class -- A Class that generates a bunch on canvas elements, and contains methods to access them. 
+*/
+Layers = function(container, names,width,height){
+    var i=0, len = names.length,can,con;
+	
+	// this.canvas, and this.context store references to each layer's canvas DOM, and 2d drawing context
+    this.canvas=[]; 
+	this.context=[];
+	this.width=width;
+	this.height=height
+	
+	// this.layerNames stores an associative array of layer names and the index number of that layer in this.canvas, and this.context
+	// this.layerNames will help me avoid the performance killing for in loop when getting a context by layer name.
+	this.layerNames={}; 
+	
+	while(i < len){
+	    can = document.createElement('canvas');
+		can.style.position='absolute';
+		con = can.getContext('2d');
+		can.width=width;
+		can.height=height;
+		
+		document.getElementById(container).appendChild(can);		
+		this.canvas.push(can);
+		this.context.push(con);
+		
+		this.layerNames[names[i]] = i;
+		
+	    i++;
+	}
+};
+
+/*
+var c = s.getContext('background');c.clearRect(0,0,500,500); // 60 bytes
+s.r('background',['clearRect', '0,0,500,500']); // 47 bytes
+*/
+
+Layers.prototype={
+    /*
+	    Layers.get(indexOrName, what) -- get a layers canvas DOM, or 2d context by index or layer name
+		
+		arguments:
+		
+		indexOrName -- give a number to get by index, or a string to get by layer name
+		
+		what -- 'context', or 'canvas' default is context
+		
+		ex:
+		
+		var context = layers.get('background'); // returns the context of the layer 'background'
+		
+		var canvas = layers.get(3,'canvas'); // returns the forth layer's canvas DOM
+	*/
+	get:function(indexOrName, what){	    
+	    if(what === undefined) what = 'context'; // get context by default
+		
+	    if(typeof indexOrName === 'number'){ // if number assume index number
+		    return this[what][indexOrName];		
+		}
+		
+		if(typeof indexOrName === 'string'){ // if string assume layer name, and use Layers.layerNames to find the index number
+		    return this[what][this.layerNames[indexOrName]];		
+		}
+	
+	},
+	
+	/*
+	    Layers.render(indexOrName, methods) -- an experimental function that has to do with canvas rendering
+	
+	
+	    var context = layers.get('background');		
+		context.fillStyle='#00ffff';
+		context.fillRect(0,0,200,200);
+		
+		layers.render('background', ['fillStyle','#00ffff','fillRect','0,0,200,200']);
+		
+		
+		var c = l.g('background');c.fillStyle='#00ffff';c.fillRect(0,0,200,200); // 72 bytes
+		
+		l.r('background', ['fillStyle','#00ffff','fillRect','0,0,200,200']); // 69 bytes
+		
+		So in theory it can save space if I make allot of references to a canvas drawing context. 
+		However performance will likely take a hit, and I would have to have allot of context.canvasMethod calls in
+		my code in order for it to pay for the byte price
+	
+	*/
+	/*
+	render:function(indexOrName, methods){
+	    var context = this.get(indexOrName),
+		i=0,len=methods.length;		
+		while(i < len){			
+			switch(typeof context[methods[i]]){
+			    case 'string':
+				    context[methods[i]] = methods[i+1];
+				break;
+				case 'function':
+				    context[methods[i]].apply(context,methods[i+1].split(','));
+				break;			
+			}
+		    i+=2;
+		}
+	},
+	*/
+	
+    // other methods I may remove	
+	/*
+    clear:function(index){
+	    this.context[index].clearRect(0,0,this.canvas[index].width,this.canvas[index].height);
+	},
+	fillTo:function(index,color){
+	    this.context[index].fillStyle=color;
+	    this.context[index].fillRect(0,0,this.canvas[index].width,this.canvas[index].height);
+	
+	}
+	*/
+};
+
+
+
+
+
+
+Orb = function(x,y){
+
+    this.x=x; // the x, and y position that the Orb is to be rendered
+    this.y=y;	
+	
+    this.radius=10;
+	this.socketed = false; // is the orb socketed into a socket building, or in the innovatory
+	
+	this.range = 150; // base attributes
+	this.speed = 2000;
+	this.slow = 1;
+	this.attack = 8;
+	
+};
+
+Orb.prototype={
+/*
+    render:function(ctx){
+        ctx.strokeStyle='#00ff00';
+        ctx.beginPath();
+        ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
+        ctx.closePath();
+        ctx.stroke();
+    }
+	*/
+};
+
+
+
+
+
+
+
+Enemy = function(x,y){
+    this.x=x;
+    this.y=y;
+    this.dx=0;
+    this.dy=1;
+	this.heading=Math.random() * (Math.PI*2);
+	
+	this.maxHp=100;
+	this.hp=this.maxHp;
+	this.range=64; // the attack range as a radius
+	
+	this.defaultTargetType='Orbs';
+	this.target='none';
+	
+    this.radius=5; // the actual radius of the enemy
+	
+	this.attack=4;
+};
+
+Enemy.prototype = {
+    step:function(){
+        this.x+=this.dx;
+        this.y+=this.dy;
+    },
+    render:function(ctx){
+        ctx.strokeStyle='#ff0000';
+        ctx.beginPath();
+        ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
+        ctx.closePath();
+        ctx.stroke();
+    }
+};
+
+var Game = function(){
+    this.user={x:0,y:0};
+	//this.grabedOrb='none';
+	this.grabed={
+	    orb:'none',
+		homeIndex:0, // the home index of the Orb in Game.OI, or Game.PB
+		homeX:0,
+		homeY:0
+	}
+    this.setUp();	
+};
+
+Game.prototype={
+
+    /*
+	    makeOrb
+		-- make an Orb and store it in the players Orb Inventory (OI), if the OI is not full.
+	
+	*/
+    makeOrb:function(){
+	/*
+	    var x,y,i=this.OI.orbs.length;		
+		if(i < this.OI.cellX*this.OI.cellY){
+		    y = Math.floor(i / this.OI.cellX);
+			x = i % this.OI.cellX;
+		    this.OI.orbs.push(
+			    new Orb(
+			        this.OI.offsetX + (this.OI.cellSize/2)+(this.OI.cellSize*x),
+				    this.OI.offsetY + (this.OI.cellSize/2)+(this.OI.cellSize*y)
+				)
+			);
+		}
+	*/
+	    var x,y,i=0,len=this.OI.cellX*this.OI.cellY;		
+		while(i<len){
+		    // if the current Slot is empty, make the new Orb and return out
+		    if(this.OI.orbs[i] === undefined){
+		        y = Math.floor(i / this.OI.cellX);
+			    x = i % this.OI.cellX;
+		        this.OI.orbs.push(
+			        new Orb(
+			            this.OI.offsetX + (this.OI.cellSize/2)+(this.OI.cellSize*x),
+				        this.OI.offsetY + (this.OI.cellSize/2)+(this.OI.cellSize*y)
+				    )
+			    );
+				return;
+			};		
+		    i++;
+		}
+	},
+	
+	
+	userGrab:function(x,y){
+        var x,y,i;
+		
+		// if the player grabbing an Orb from there inventory?
+		if(Shell.boundingBox(this.user.x,this.user.y,1,1,this.OI.offsetX,this.OI.offsetY,this.OI.cellSize*this.OI.cellX,this.OI.cellSize*this.OI.cellY)){
+		    x = Math.floor( (this.user.x - this.OI.offsetX) / this.OI.cellSize ),
+			y = Math.floor( (this.user.y - this.OI.offsetY) / this.OI.cellSize );
+			i = (y*this.OI.cellX)+x;
+			
+			if(this.OI.orbs[i] !== undefined){
+			    this.grabed.orb = this.OI.orbs[i];
+			    this.grabed.homeX=this.grabed.orb.x;
+			    this.grabed.homeY=this.grabed.orb.y;
+			
+			    // if the Orb is not socketed (in the inventory)
+			    if(!this.socketed){
+			        this.grabed.homeIndex=i; // remember where it goes, so we can free up the slot
+			    }
+			}else{
+			    console.log('empty slot clicked');
+			}
+		}
+	},
+	userRelease:function(x,y){
+	
+	    // if the player has an Orb in hand...
+		if(this.grabed.orb !== 'none'){
+		
+		    // is the Orb Over the Player Board (Game.PB)?
+			if(Shell.boundingBox(
+			    this.user.x,this.user.y,1,1,
+				this.PB.offsetX,this.PB.offsetY,this.PB.cellX*this.PB.cellSize,this.PB.cellY*this.PB.cellSize
+			)){
+			    x = Math.floor( (this.user.x - this.PB.offsetX) / this.PB.cellSize ),
+			    y = Math.floor( (this.user.y - this.PB.offsetY) / this.PB.cellSize );
+			    i = (y*this.PB.cellX)+x;
+				
+				// is there a building?
+				if(this.buildings[i] !== undefined){
+				    
+					// is it a socket?
+				    if(this.buildings[i].typeIndex === 1){
+					    // is it free?
+					    if(this.buildings[i].socketed === undefined){
+						    // then the Orb Has a new Home.
+							this.grabed.orb.socketed=true;
+							this.grabed.orb.x = this.buildings[i].x+(this.buildings[i].cellSize/2);
+							this.grabed.orb.y = this.buildings[i].y+(this.buildings[i].cellSize/2);
+							this.buildings[i].socketed = this.grabed.orb;
+							
+							// free up it's slot in the inventory
+							this.OI.orbs[this.grabed.homeIndex] = undefined;
+							console.log(this.buildings[i].x+','+this.buildings[i].y);
+						    console.log('orb socketed!'+i);
+						}else{
+						    // then put it back
+						    this.grabed.orb.x=this.grabed.homeX;
+			                this.grabed.orb.y=this.grabed.homeY;
+						}
+					
+					    
+					
+					}else{
+					    // then put it back
+					    this.grabed.orb.x=this.grabed.homeX;
+			            this.grabed.orb.y=this.grabed.homeY;
+					}
+				}else{
+				    // if not then put it back
+				    this.grabed.orb.x=this.grabed.homeX;
+			        this.grabed.orb.y=this.grabed.homeY;
+				}
+				
+			    //console.log('placed in player board');
+			    console.log(i);
+			}else{
+			
+			
+			// is the Orb Over the players Orb Invatory (Game.OI)?
+			if(Shell.boundingBox(
+			    this.user.x,this.user.y,1,1,
+				this.OI.offsetX,this.OI.offsetY,this.OI.cellX*this.OI.cellSize,this.OI.cellY*this.OI.cellSize
+			)){
+			    x = Math.floor( (this.user.x - this.OI.offsetX) / this.OI.cellSize ),
+			    y = Math.floor( (this.user.y - this.OI.offsetY) / this.OI.cellSize );
+			    i = (y*this.OI.cellX)+x;
+				
+				// is the underlying slot empty?
+				if(this.OI.orbs[i] === undefined){
+				    this.OI.orbs[i] = this.grabed.orb;
+					this.OI.orbs[i].x = this.OI.offsetX + (this.OI.cellSize/2) + (x*this.OI.cellSize);
+					this.OI.orbs[i].y = this.OI.offsetY + (this.OI.cellSize/2) + (y*this.OI.cellSize);
+					this.OI.orbs[this.grabed.homeIndex] = undefined;
+				}else{
+				   // then put it back
+				   this.grabed.orb.x=this.grabed.homeX;
+			       this.grabed.orb.y=this.grabed.homeY;
+				}
+			
+			}else{
+			    // if the player is going noware with it, put it back
+			    this.grabed.orb.x=this.grabed.homeX;
+			    this.grabed.orb.y=this.grabed.homeY;
+			}
+			
+		} // end if the player has an Orb in hand
+		
+		}
+		
+		this.grabed.orb='none';
+	},
+	userMove:function(x,y){
+	    this.user.x=x;
+		this.user.y=y;		
+		if(this.grabed.orb !== 'none'){
+		    this.grabed.orb.x=this.user.x;
+			this.grabed.orb.y=this.user.y;
+		}
+	},
+	
+	
+    setUp:function(){
+        var i; // index pointer, used in loops
+		
+		// the player board (PB), is the area where player buildings can be placed
+		this.PB = {
+		    cellSize:32,
+			cellX:14,
+			cellY:7,
+			offsetX:25,
+			offsetY:231		
+		};
+		
+		// the players Orb Inventory (OI), this is where un-socketed Orbs are stored
+		this.OI = {
+		    orbs:[], // unused orbs will be stored here, used Orbs will be stored in Game.buildings
+		    cellSize:32,
+			cellX:4,
+			cellY:4,
+			offsetX:640 - (32*4)-25,
+			offsetY:480 - (32*4)-25		
+		};
+		
+		// set up starting Orbs
+		for( i=0; i < 8 ; i++){
+		    this.makeOrb(); 
+		}
+				
+		/*
+		var x=0,y=0;
+		for(i=0; i!=10;i++){
+		    this.OI.orbs.push(
+			    new Orb(
+			        this.OI.offsetX + (this.OI.cellSize/2)+(this.OI.cellSize*x),
+				    this.OI.offsetY + (this.OI.cellSize/2)+(this.OI.cellSize*y)
+				)
+			);
+			x++;
+			if(x >= this.OI.cellX){
+			    x=0;
+				y++;
+			}
+		}
+		*/
+		
+		// set up the Enemy's array
+		this.enemys=[];
+		
+		
+		var eCount = Math.round(Math.random()*19)+1;
+		
+		for(i=0; i!=eCount;i++){
+		    this.enemys.push(new Enemy(Math.round(Math.random()*500),-20));
+		}
+	
+	    // set up starting buildings
+    	this.buildings=[];
+		//this.buildings.push(new Building('p',0,12,5,this.PB.offsetX,this.PB.offsetY));		
+		for(i=0; i!=13;i+=1){
+			this.buildings.push(new Building('s'+i,1,i,0,this.PB.offsetX,this.PB.offsetY));
+		}
+		
+		this.buildings.push(new Building('p',0,12,5,this.PB.offsetX,this.PB.offsetY));
+		
+		this.buildings[3].socketed = new Orb(this.buildings[3].x+this.buildings[3].cellSize/2,this.buildings[3].y+this.buildings[3].cellSize/2);
+		this.buildings[7].socketed = new Orb(this.buildings[7].x+this.buildings[7].cellSize/2,this.buildings[7].y+this.buildings[7].cellSize/2);
+		this.buildings[11].socketed = new Orb(this.buildings[11].x+this.buildings[11].cellSize/2,this.buildings[11].y+this.buildings[11].cellSize/2);
+		
+	},
+    killBuilding:function(id){
+	    var i=0,len;
+				
+		i=0,len=this.buildings.length;		
+		while(i <len){
+		    if(this.buildings[i].id === id){
+			    this.buildings.splice(i,1);
+				break;			
+			}
+		    i++;
+		}
+		
+		// reset target ids for all enemy's attacking that building to 'none'
+		i=0,len=this.enemys.length;
+		while(i<len){
+		    if(this.enemys[i].target.id === id){
+			    this.enemys[i].target.id='none';
+			}
+		    i++;
+		};
+	},
+	
+	killEnemy:function(index){
+	  
+	    this.enemys.splice(index,1);
+				
+	},
+	
+    updateEnemyAI:function(){
+	   var e,  // enemy
+		d,  // distance
+		ei=0, // enemy index
+		eLen=this.enemys.length, // enemy length
+		bLen=this.buildings.length, // buidings length
+	    th, // target heading;
+		angles; // the angles used to find if an enemy should turn clockwise or counter clockwise
+			
+		/* 
+		  for each enemy, update enemy, and check the relation to it's current target, 
+		  if the enemy has no target, get one. If there are no targets to get then the player has lost
+		*/
+		
+		    while(ei < eLen){
+    		    e = this.enemys[ei];
+			
+			    // if the enemy has no target get one
+			    if(e.target === 'none'){
+			        //e.target=this.orbs[Math.floor(Math.random()*oLen)];
+					e.target = this.buildings[Math.floor(Math.random()*bLen)];
+			    }
+			    
+				
+				
+				
+				// if e.heading does not equal target heading change course
+				if(e.heading != th){
+				
+				    // find the target heading, compare to current heading and change course if needed
+				    th = Number(Math.atan2(e.target.y+(e.target.cellSize/2)-e.y,e.target.x+(e.target.cellSize/2)-e.x).toFixed(2));	
+				
+				    // convert atan2 -PI to PI to 0 to PI*2 form;
+                    if(th < 0){th += Math.PI*2;}
+                
+				    // find the angles that will be used to determine which way the enemy will turn 
+				    angles = Shell.findAngles(e.heading,th);
+				    
+					// change course
+					if(angles.clock < angles.counter){
+				        e.heading -= 0.1;
+				    }else{					    
+				        e.heading += 0.1;						
+				    }
+				}
+				
+				// adjust e.heading if it goes out of bounds
+				if(e.heading > Math.PI*2) e.heading -= Math.PI*2;
+				if(e.heading < 0) e.heading += Math.PI*2;
+
+                // format e.heading				
+				e.heading = Number(e.heading.toFixed(2));
+				
+				// set deltaX and deltaY based on current heading
+				e.dx = Math.cos(e.heading)*5;
+				e.dy = Math.sin(e.heading)*5;
+				
+				// find distance between enemy and enemy's current target
+				d = Shell.distance(e.target.x,e.target.y,e.x,e.y);
+				
+				// if the enemy is not in range of it's target step
+				if(d > e.range){
+				    e.step();
+				}else{ // else the enemy can attack
+				    e.target.hp-=e.attack;
+					
+					// if the targets hp has reached zero it is destroyed
+				    if(e.target.hp <= 0){
+					    this.killBuilding(e.target.id);
+					    e.target='none';
+					    bLen=this.buildings.length;
+						
+						// check for player defeat
+						this.checkForDefeat();
+						/*
+					    if(bLen === 0){
+						    //if there are no more player buildings then break out of the loop
+						    break;
+						}
+						*/
+					   
+					}
+				}
+				
+		        ei++;
+		    }
+
+		
+    },
+	
+	
+	
+	
+	updatePlayerAttack:function(){
+	    var i=0,b,
+		len=this.buildings.length,
+		ei,e,
+		eLen=this.enemys.length,
+		orb,
+		killList=[];
+		
+		while(i<len){
+		    b=this.buildings[i];
+		    if(b.socketed){
+			    orb = b.socketed;
+				ei=0;
+				while(ei < eLen){
+				    e = this.enemys[ei]; 
+				    if(Shell.distance(orb.x,orb.y,e.x,e.y) < orb.range){
+					    e.hp-=orb.attack;
+						
+						if(e.hp <=0){
+						    console.log('enemy has been killed!');
+							killList.push(ei);
+							
+							
+						}
+					    console.log('building'+i+'\'s orb is ready to attack! ');
+						
+					    break; // only attack one enemy in range
+					}
+					ei++;
+				}
+			}
+		    i++;
+		}
+		
+		i=0,len=killList.length;
+		while(i<len){
+		    this.killEnemy(killList[i]);
+		    i++;
+		}
+		this.checkForVictory(); // check to see if the player won
+	
+	},
+	
+	
+	/*
+	    checkForDefeat 
+		
+		-- to be called each time an enemy destroys a player's building.		
+	*/
+	checkForDefeat:function(){
+	    //if the amount of buildings === 0 then the player has lost
+	    if(this.buildings.length === 0){
+		    console.log('The player has lost');
+			
+			lost++;
+			
+		    this.setUp();
+		}
+		
+	},
+	checkForVictory:function(){
+	    //if the amount of buildings === 0 then the player has lost
+		console.log('checking');
+	    if(this.enemys.length === 0){
+		    console.log('The player has won');
+			
+			win++;
+			
+		    this.setUp();
+		}
+		
+	},
+	
+	
+	
+	
+	/*
+	    update
+		
+		-- the main update function that will be called in thread each game tick, when the app's state machine
+		is in 'game' state.
+	*/
+	update:function(){
+	    
+		// update the Enemy's, and check for defeat.
+	    this.updateEnemyAI();
+		this.updatePlayerAttack();
+		
+	},
+
+    render:function(ctx){
+	    var i,len,obj;
+	    ctx.lineWidth=2;
+		
+		// redner the player board (PB)
+		this.renderGL(this.PB, ctx);
+		
+		// render the OI		
+		this.renderGL(this.OI, ctx);
+		
+		
+		// render buildings
+		i=0,len=this.buildings.length;
+		while(i <len){
+		    //this.buildings[i].render(ctx);
+			obj=this.buildings[i];
+			if(obj !== undefined){
+			    ctx.strokeStyle='#00ffff';
+		        ctx.strokeRect(obj.x,obj.y,obj.cellSize,obj.cellSize);
+			
+			    // if it has an Orb render it
+			    if(obj.socketed){
+    				var orb = obj.socketed;
+			        ctx.fillStyle='#ff00ff';
+			        ctx.beginPath();
+			        ctx.arc(orb.x,orb.y,orb.radius,0,Math.PI*2);
+			        ctx.closePath();
+			        ctx.fill();
+			    }
+			
+			    // draw building health bars
+			    ctx.fillStyle='#afafaf';
+			    ctx.fillRect(obj.x,obj.y,32,4);
+			    ctx.fillStyle='#00ff00';
+			    ctx.fillRect(obj.x,obj.y, Number(Shell.percent(obj.hp,obj.maxHp)/100)*32,4);
+		        i++;
+			}
+		}
+		
+		
+		// render orbs
+		// render unused OI orbs in the OI inventory
+		i=0, len = this.OI.orbs.length;
+		while(i <len){
+		    obj = this.OI.orbs[i];
+			if(obj !== undefined){
+			    ctx.fillStyle='#ff00ff';
+			    ctx.beginPath();
+			    ctx.arc(obj.x,obj.y,obj.radius,0,Math.PI*2);
+			    ctx.closePath();
+			    ctx.fill();
+		        
+			}
+			i++;
+		}
+		
+		// render enemys
+		i=0,len=this.enemys.length;
+		while(i < len){
+		    obj = this.enemys[i];
+            obj.render(ctx);
+
+			
+			ctx.strokeStyle='#00aa00';
+			ctx.beginPath();
+			ctx.arc(obj.x,obj.y,8,0,Number(Shell.percent(obj.hp,obj.maxHp)/100)*(Math.PI*2));
+			//ctx.closePath();
+			ctx.stroke();
+			
+			
+			i++
+		}
+		
+		
+		// mouse cursor position
+		//ctx.fillStyle='#ffffff';
+		//ctx.fillText(this.user.x+','+this.user.y,10,10);
+		
+		
+		// this.OI.orbs state
+		/*
+		i=0,len=this.OI.orbs.length;
+		while(i<len){
+		    ctx.fillText(i+' : '+this.OI.orbs[i],10,i*10+50);
+		    i++;
+		}
+		*/
+		
+		// win lost count
+	    ctx.fillStyle='#ffffff';
+		ctx.fillText('win:'+win+', lost:'+lost,10,10);
+    },
+	
+	
+	/*
+	    renderGL
+		-- render grid lines the Player Board (Game.PB), or the players Orb Inventory (Game.OI)
+	
+	*/
+	renderGL:function(what, ctx){
+	    var cx=0, cy=0;
+		ctx.strokeStyle='rgba(255,255,255,0.25)';
+		while(cy < what.cellY){
+			cx=0;
+		    while(cx < what.cellX){
+			    ctx.strokeRect(
+				    cx*what.cellSize+what.offsetX, 
+					cy*what.cellSize+what.offsetY,
+					what.cellSize,
+					what.cellSize
+				);
+			    cx++;
+			}
+		    cy++;
+		}
+	}
+};
+
+
+
+/*
+    Building Class
+
+*/
+Building=function(id,typeIndex,cellX,cellY,boardx,boardy){
+    this.id=id;
+	this.typeIndex=typeIndex; // the building type '0: tower, 1: socket, 2: manaWell, 3: manaStore'
+	
+	this.cellSize=32;
+    this.cellX = cellX; // the cell x position in the game board
+	this.cellY = cellY; // the cell y position in the game board
+	
+	this.x = this.cellX*this.cellSize+boardx; // the actual x and y positions
+	this.y = this.cellY*this.cellSize+boardy;
+	
+	this.maxHp=100;
+	this.hp=this.maxHp;
+	
+	this.socketed; // the orb that is socketed to the building if it is building type 1, undefined means none
+	
+};
+
+Building.prototype={
+/*
+    render:function(ctx){
+        ctx.strokeStyle='#00ff00';
+        
+        ctx.strokeRect(this.cellX*this.cellSize,this.cellY*this.cellSize,this.cellSize,this.cellSize);
+    } 
+	*/
+};
+
+
+
+/*
+  The games state machine
+*/
+state = {
+    start:{
+	    update:function(){
+		    var context;
+		    sheets = new Layers('app',['background','orbs','disp'], 640,480);			
+			//sheets.fillTo(0, '#000000');
+			
+			// draw black background
+			context = sheets.get('background');
+			context.fillStyle='#1a1a1a';
+			context.fillRect(0,0,sheets.width,sheets.height);
+			
+			// set up new Game
+			currentGame = new Game();
+			
+			// attach Event Handlers
+            (function(){
+			    var canvas = sheets.get('disp', 'canvas');				
+			    Shell.bind(canvas, 'mousemove', function(e){
+			        var box = canvas.getBoundingClientRect();
+    			    mx = e.clientX - box.left;
+				    my = e.clientY - box.top;
+                    currentGame.userMove(mx,my);
+			    });
+			    Shell.bind(canvas, 'mousedown', function(e){
+				    var box = canvas.getBoundingClientRect();
+    			    mx = e.clientX - box.left;
+				    my = e.clientY - box.top;
+                    currentGame.userGrab(mx,my);
+				});
+				Shell.bind(canvas, 'mouseup', function(e){
+				    var box = canvas.getBoundingClientRect();
+    			    mx = e.clientX - box.left;
+				    my = e.clientY - box.top;
+                    currentGame.userRelease(mx,my);
+				});
+			
+			})();
+			
+			
+			
+			
+			
+		    currentState='game';
+		},
+		render:function(){}
+	},
+	game:{
+	    update:function(){
+		
+		   currentGame.update();
+		   
+		},
+		render:function(){
+		   var context = sheets.get('orbs');
+		   //context.fillStyle='#00ffff';
+		   context.clearRect(0,0,sheets.width,sheets.height);
+		   currentGame.render(sheets.get('orbs'));
+		}
+	}
+	
+};
+
+thread = function(){
+    
+	
+	if(new Date() - lt >= frameRate){
+	    state[currentState].update();
+	    state[currentState].render();
+		lt = new Date();
+	}
+	requestAnimationFrame(thread);
+};
+thread();
+
+})();
+
+</script>

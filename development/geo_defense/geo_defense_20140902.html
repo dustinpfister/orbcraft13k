@@ -1,0 +1,420 @@
+
+<div id="app"></div>
+<script>
+
+(function(){
+
+var Shell, // a custom framework for this game
+        
+	Game, // the Main game class will be used to do most of the work with the game
+	currentGame, // will hold the current instance of Game class
+	Orb, // the orb class reltes to the games "Orbs" which can be "socketed" to a building type of "Orb Socket"
+	Building, // players Building class	
+	Enemy, // the Enemy Class
+	
+	
+	Layers, // a class used for canvas layering
+	sheets, // will hold an instance of Layers
+	state, // the state machine
+    currentState='start', // the state machines current state
+	lt = new Date(), // "last time" used to cap frame rate
+	frameRate=1000/30, // the frame rate of the game
+	thread; // the main game loop
+    
+	//Player,
+	//player;
+
+/*
+    Using the requesrAnimationFrame shim found at: https://gist.github.com/mrdoob/838785 
+
+    * Provides requestAnimationFrame in a cross browser way.
+    * @author paulirish / http://paulirish.com/
+
+*/
+if (!window.requestAnimationFrame) { 
+	window.requestAnimationFrame = ( function() { 
+		return window.webkitRequestAnimationFrame ||
+		window.mozRequestAnimationFrame ||
+		window.oRequestAnimationFrame ||
+		window.msRequestAnimationFrame ||
+		function(callback, element ) { 
+			window.setTimeout( callback, 1000 / 60 );
+ 
+		};
+ 
+	} )(); 
+}
+
+
+
+
+/*
+   Shell is a custom framework that contains a few functions used throughout this game
+*/
+Shell = {
+    distance : function(x1,y1,x2,y2){
+        return Math.sqrt(  Math.pow(x1-x2,2)+Math.pow(y1-y2,2)  );    
+	}
+};
+
+
+/*
+    The Layers Class -- A Class that generates a bunch on canvas elements, and contains methods to access them. 
+*/
+Layers = function(container, names,width,height){
+    var i=0, len = names.length,can,con;
+	
+	// this.canvas, and this.context store references to each layer's canvas DOM, and 2d drawing context
+    this.canvas=[]; 
+	this.context=[];
+	this.width=width;
+	this.height=height
+	
+	// this.layerNames stores an associative array of layer names and the index number of that layer in this.canvas, and this.context
+	// this.layerNames will help me avoid the performance killing for in loop when getting a context by layer name.
+	this.layerNames={}; 
+	
+	while(i < len){
+	    can = document.createElement('canvas');
+		can.style.position='absolute';
+		con = can.getContext('2d');
+		can.width=width;
+		can.height=height;
+		
+		document.getElementById(container).appendChild(can);		
+		this.canvas.push(can);
+		this.context.push(con);
+		
+		this.layerNames[names[i]] = i;
+		
+	    i++;
+	}
+};
+
+/*
+var c = s.getContext('background');c.clearRect(0,0,500,500); // 60 bytes
+s.r('background',['clearRect', '0,0,500,500']); // 47 bytes
+*/
+
+Layers.prototype={
+    /*
+	    Layers.get(indexOrName, what) -- get a layers canvas DOM, or 2d context by index or layer name
+		
+		arguments:
+		
+		indexOrName -- give a number to get by index, or a string to get by layer name
+		
+		what -- 'context', or 'canvas' default is context
+		
+		ex:
+		
+		var context = layers.get('background'); // returns the context of the layer 'background'
+		
+		var canvas = layers.get(3,'canvas'); // returns the forth layer's canvas DOM
+	*/
+	get:function(indexOrName, what){	    
+	    if(what === undefined) what = 'context'; // get context by default
+		
+	    if(typeof indexOrName === 'number'){ // if number assume index number
+		    return this[what][indexOrName];		
+		}
+		
+		if(typeof indexOrName === 'string'){ // if string assume layer name, and use Layers.layerNames to find the index number
+		    return this[what][this.layerNames[indexOrName]];		
+		}
+	
+	},
+	
+	/*
+	    Layers.render(indexOrName, methods) -- an experimental function that has to do with canvas rendering
+	
+	
+	    var context = layers.get('background');		
+		context.fillStyle='#00ffff';
+		context.fillRect(0,0,200,200);
+		
+		layers.render('background', ['fillStyle','#00ffff','fillRect','0,0,200,200']);
+		
+		
+		var c = l.g('background');c.fillStyle='#00ffff';c.fillRect(0,0,200,200); // 72 bytes
+		
+		l.r('background', ['fillStyle','#00ffff','fillRect','0,0,200,200']); // 69 bytes
+		
+		So in theory it can save space if I make allot of references to a canvas drawing context. 
+		However performance will likely take a hit, and I would have to have allot of context.canvasMethod calls in
+		my code in order for it to pay for the byte price
+	
+	*/	
+	render:function(indexOrName, methods){
+	    var context = this.get(indexOrName),
+		i=0,len=methods.length;		
+		while(i < len){			
+			switch(typeof context[methods[i]]){
+			    case 'string':
+				    context[methods[i]] = methods[i+1];
+				break;
+				case 'function':
+				    context[methods[i]].apply(context,methods[i+1].split(','));
+				break;			
+			}
+		    i+=2;
+		}
+	},
+	
+    // other methods I may remove	
+    clear:function(index){
+	    this.context[index].clearRect(0,0,this.canvas[index].width,this.canvas[index].height);
+	},
+	fillTo:function(index,color){
+	    this.context[index].fillStyle=color;
+	    this.context[index].fillRect(0,0,this.canvas[index].width,this.canvas[index].height);
+	
+	}
+};
+
+
+
+/*
+    Orb Class
+
+*/
+/*
+Orb = function(x,y){
+    this.x=x;
+	this.y=y;
+	this.w=32;
+	this.h=32;
+	
+	this.level=1;
+	this.xp=0;
+	
+	this.base = {
+	    maxHp:100,
+	    range:3,
+		attack:7
+	};
+	
+	this.skillPoints=10;
+	this.elements={
+	    earth:1,
+		wind:1,
+		water:1,
+		fire:1	
+	}
+	
+	this.hp=this.base.maxHp;
+	
+};
+
+*/
+
+
+
+
+/*
+    The Player class
+*/
+/*
+Player = function(){
+    this.orbs = [];
+};
+*/
+
+
+Orb = function(id,x,y){
+    this.id=id;
+    this.x=x;
+    this.y=y;	
+	this.range=50;	
+    this.radius=10;
+};
+
+Orb.prototype={
+    render:function(ctx){
+        ctx.strokeStyle='#00ff00';
+        ctx.beginPath();
+        ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
+        ctx.closePath();
+        ctx.stroke();
+    }
+};
+
+Enemy = function(x,y){
+    this.x=x;
+    this.y=y;
+    this.dx=0;
+    this.dy=1;
+	this.heading=0;
+	
+	this.maxHp=100;
+	this.hp=this.maxHp;
+	this.range=40; // the attack range as a radius
+	
+	this.defaultTargetType='Orbs';
+	this.target='none';
+	
+    this.radius=5; // the actual radius of the enemy
+};
+
+Enemy.prototype = {
+    step:function(){
+        this.x+=this.dx;
+        this.y+=this.dy;
+    },
+    render:function(ctx){
+        ctx.strokeStyle='#ff0000';
+        ctx.beginPath();
+        ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);
+        ctx.closePath();
+        ctx.stroke();
+    }
+};
+
+var Game = function(){
+    this.orbs=[];
+    this.orbs.push(new Orb('o1',320,240));
+    this.orbs.push(new Orb('o2',100,250));	
+    this.enemys=[];
+    this.enemys.push(new Enemy(320,20));
+};
+
+Game.prototype={
+    update:function(){
+	   var e,o,d,ei,oi,eLen,oLen,
+	   th; // target heading;
+	
+        /*e = this.enemys[0],
+        o = this.orbs[0],
+	    d = Shell.distance(e.x,e.y,o.x,o.y);
+        
+		
+        if(d > e.range){
+           this.enemys[0].step();
+        }
+		*/
+		
+		ei=0,
+		eLen=this.enemys.length,
+		oLen=this.orbs.length;
+		
+		
+		/* 
+		  for each enemy, update enemy, and check the relation to it's current target, 
+		  if the enemy has no target, get one. If there are no targets to get then the player has lost
+		*/
+		
+		if(oLen === 0){
+		    console.log('player has lost');
+			throw new Error('Game Over!');
+		}else{
+		    while(ei < eLen){
+    		    e = this.enemys[ei];
+			    oi=0;
+			
+			    // if the enemy has no target get one
+			    if(e.target === 'none'){
+			        e.target=this.orbs[Math.floor(Math.random()*oLen)];
+			    }
+			    
+				
+				// find the target heading, compare to current heading and change course if needed
+				th = Number(Math.atan2(e.target.y-e.y,e.target.x-e.x).toFixed(2));				
+				if(th > e.heading){
+				    e.heading+=0.1;
+				}
+				if(th < e.heading){
+				    e.heading-=0.1;
+				}
+				e.heading = Number(e.heading.toFixed(2));
+				
+				// set deltaX and deltaY based on current heading
+				e.dx = Math.cos(e.heading)*5;
+				e.dy = Math.sin(e.heading)*5;
+				
+				d = Shell.distance(e.target.x,e.target.y,e.x,e.y);
+				
+				if(d > e.range){
+				    e.step();
+				}
+				
+				//throw new Error('break');
+				
+			    /*while(oi < oLen){
+    			    o = this.orbs[oi];
+			        oi++;
+			    }
+				*/
+		        ei++;
+		    }
+		} // end if player has lost
+		
+    },
+    render:function(ctx){
+	    
+		var i=0,len = this.orbs.length;
+		
+		while(i<len){
+            this.orbs[i].render(ctx);
+			i++;
+		}
+		
+		i=0,len=this.enemys.length;
+		while(i < len){
+            this.enemys[i].render(ctx);
+			i++
+		}
+    }
+};
+
+
+
+/*
+  The games state machine
+*/
+state = {
+    start:{
+	    update:function(){
+		    sheets = new Layers('app',['background','orbs'], 640,480);			
+			//sheets.fillTo(0, '#000000');
+			
+			// draw black background
+			var context = sheets.get('background');
+			context.fillStyle='#000000';
+			context.fillRect(0,0,sheets.width,sheets.height);
+			
+			currentGame = new Game();
+		    currentState='game';
+		},
+		render:function(){}
+	},
+	game:{
+	    update:function(){
+		
+		   currentGame.update();
+		   
+		},
+		render:function(){
+		   var context = sheets.get('orbs');
+		   //context.fillStyle='#00ffff';
+		   context.clearRect(0,0,sheets.width,sheets.height);
+		   currentGame.render(sheets.get('orbs'));
+		}
+	}
+	
+};
+
+thread = function(){
+    
+	
+	if(new Date() - lt >= frameRate){
+	    state[currentState].update();
+	    state[currentState].render();
+		lt = new Date();
+	}
+	requestAnimationFrame(thread);
+};
+thread();
+
+})();
+
+</script>

@@ -1,0 +1,128 @@
+
+<div id="app"></div>
+<script>
+
+(function(){
+
+    var container,canvas,context,
+	
+	p1={
+	    heading:3.14,
+		dx:0,
+		dy:0,
+		x:250,
+		y:195
+	
+	},
+	p2={
+	    heading:0,
+		dx:0,
+		dy:0,
+		x:250,
+		y:250
+	
+	},
+	
+	Shell = {
+        distance : function(x1,y1,x2,y2){
+            return Math.sqrt(  Math.pow(x1-x2,2)+Math.pow(y1-y2,2)  );    
+    	},
+    	percent : function(low,high){
+	        return low * 100 / high;
+	    },
+	    findAngles:function(currentHeading,targetHeading){
+	        var angles={};
+	        angles.clock=currentHeading-targetHeading,angles.counter=targetHeading-currentHeading;
+		    if(angles.clock < 0) angles.clock+=Math.PI*2;
+		    if(angles.counter <0) angles.counter+=Math.PI*2;
+		    //if(angle1 < angle2){ return true}else{return false};
+	        return angles;
+	    },
+		fixAtan2:function(fromX,fromY,toX,toY){
+	        ma = Math.atan2(toY-fromY,toX-fromX)+Math.PI;
+	        if(ma > 0 && ma <= Math.PI*0.5){
+	            ma = Math.PI/2-ma;
+            }else{
+	            if(ma > Math.PI*0.5 && ma <= Math.PI){
+		            ma=Math.PI*2.5-ma;
+	    	    }else{
+	                if(ma > Math.PI && ma <= Math.PI*1.5){
+    			        ma = Math.PI*2.5-ma;
+    			    }else{
+	                    if(ma > Math.PI*1.5 && ma <= Math.PI*2){
+		    			    ma=Math.PI-(ma-Math.PI*1.5);
+	    		        }	
+	                }
+	            }
+	        }
+		    return ma;
+	    }
+    },
+	
+	start=function(){
+	    container = document.getElementById('app');
+		canvas = document.createElement('canvas');
+		context = canvas.getContext('2d');
+		
+		container.appendChild(canvas);
+		
+		canvas.width=500;
+		canvas.height=500;
+	
+	    thread();
+	},
+	update=function(){
+	    var targetHeading = Math.atan2(p2.y-p1.y,p2.x-p1.x)+Math.PI;
+		
+		//var targetHeading = Shell.fixAtan2(p1.x,p1.y,p2.x,p2.y);
+		
+		var angles = Shell.findAngles(p1.heading,targetHeading);
+		
+		
+		
+		if(angles.clock > angles.counter){
+		    p1.heading -= 0.1;
+		}else{
+		    p1.heading += 0.1;
+		}
+		
+		var d = Shell.distance(p1.x,p1.y,p2.x,p2.y);
+		
+		p1.dx = Math.cos(p1.heading) * 5;
+		p1.dy = Math.sin(p1.heading) * 5;
+		
+		if(d > 40){
+		    p1.x += p1.dx;
+		    p1.y += p1.dy;
+		}else{
+		    p1.x = Math.round(Math.random()*500);
+			p1.y = Math.round(Math.random()*500);
+		
+		}
+	},
+	render=function(){
+	    context.fillStyle='#000000';
+		context.fillRect(0,0,canvas.width,canvas.height);
+		
+		context.strokeStyle='#ff0000';
+		context.beginPath();
+		context.arc(p1.x,p1.y,5,0,Math.PI*2);
+		context.closePath();
+		context.stroke();
+	
+	    context.strokeStyle='#00ff00';
+		context.beginPath();
+		context.arc(p2.x,p2.y,5,0,Math.PI*2);
+		context.closePath();
+		context.stroke();
+	},
+	thread=function(){
+	    setTimeout(thread, 1000/30);
+		update();
+	    render();
+	};	
+	start();
+
+})();
+
+</script>
